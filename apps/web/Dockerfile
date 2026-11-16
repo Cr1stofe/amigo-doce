@@ -6,7 +6,7 @@ COPY apps/api/package.json apps/api/package.json
 COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile
 COPY apps/web apps/web
-ARG API_URL=http://api:3001
+ARG API_URL=http://amigo-doce-api:3001
 ENV API_URL=${API_URL}
 RUN pnpm --filter @amigo-doce/web build
 
