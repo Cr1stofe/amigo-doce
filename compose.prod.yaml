@@ -1,7 +1,15 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   db:
     image: postgres:17-alpine
     restart: unless-stopped
+    mem_limit: 512m
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?configure POSTGRES_DB in .env}
       POSTGRES_USER: ${POSTGRES_USER:?configure POSTGRES_USER in .env}
@@ -18,10 +26,13 @@ services:
       start_period: 20s
 
   migrate:
+    image: amigo-doce-api:latest
     build:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: "no"
+    mem_limit: 512m
+    logging: *default-logging
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?configure DATABASE_URL in .env}
@@ -38,6 +49,8 @@ services:
       context: .
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    mem_limit: 512m
+    logging: *default-logging
     environment:
       NODE_ENV: production
       PORT: "3001"
@@ -68,6 +81,8 @@ services:
       args:
         API_URL: http://amigo-doce-api:3001
     restart: unless-stopped
+    mem_limit: 512m
+    logging: *default-logging
     environment:
       API_URL: http://amigo-doce-api:3001
     expose:

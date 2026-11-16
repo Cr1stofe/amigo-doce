@@ -1,4 +1,4 @@
-import { BadRequestException, Body, CanActivate, Controller, Delete, ExecutionContext, Get, HttpException, HttpStatus, Injectable, Module, NotFoundException, Param, Patch, Post, Req, Res, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, Body, CanActivate, Controller, Delete, ExecutionContext, Get, HttpException, HttpStatus, Injectable, Module, NotFoundException, OnModuleDestroy, Param, Patch, Post, Req, Res, ServiceUnavailableException, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { Prisma, PrismaClient } from '@prisma/client';
 import { IsDateString, IsNotEmpty, IsOptional, IsString, Matches, MaxLength } from 'class-validator';
@@ -6,12 +6,15 @@ import { Request, Response } from 'express';
 import { decrypt, draw, encrypt, equal, hash, token } from './security';
 
 @Injectable()
-class Database extends PrismaClient {
+class Database extends PrismaClient implements OnModuleDestroy {
   constructor() {
     const adapter = new PrismaPg({
       connectionString: process.env.DATABASE_URL,
     });
     super({ adapter });
+  }
+  async onModuleDestroy() {
+    await this.$disconnect();
   }
 }
 const cookieName = 'amigo_session';
@@ -58,7 +61,15 @@ async function lockEvent(tx: Prisma.TransactionClient, id: string) {
 @Controller()
 class AppController {
   constructor(private db: Database) {}
-  @Get('health') health() { return { status: 'ok' }; }
+  @Get('health')
+  async health() {
+    try {
+      await this.db.$queryRaw`SELECT 1`;
+      return { status: 'ok' };
+    } catch {
+      throw new ServiceUnavailableException('Database unavailable');
+    }
+  }
   @Post('auth/login') async login(@Body() body: LoginDto, @Res({ passthrough: true }) res: Response) {
     const [limit] = await this.db.$queryRaw<{ attempts: number }[]>`INSERT INTO "LoginRateLimit" (id, attempts, "windowStart") VALUES ('global', 1, NOW()) ON CONFLICT (id) DO UPDATE SET attempts = CASE WHEN "LoginRateLimit"."windowStart" <= NOW() - INTERVAL '1 minute' THEN 1 ELSE "LoginRateLimit".attempts + 1 END, "windowStart" = CASE WHEN "LoginRateLimit"."windowStart" <= NOW() - INTERVAL '1 minute' THEN NOW() ELSE "LoginRateLimit"."windowStart" END RETURNING attempts`;
     if (limit.attempts > 20) { res.setHeader('Retry-After', '60'); throw new HttpException('Too many login attempts', HttpStatus.TOO_MANY_REQUESTS); }
