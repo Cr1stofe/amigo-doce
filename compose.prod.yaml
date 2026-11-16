@@ -1,0 +1,97 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?configure POSTGRES_DB in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?configure POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?configure POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  migrate:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: "no"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?configure DATABASE_URL in .env}
+    command: ["./node_modules/.bin/prisma", "migrate", "deploy"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - private
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: "3001"
+      DATABASE_URL: ${DATABASE_URL:?configure DATABASE_URL in .env}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:?configure ADMIN_USERNAME in .env}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?configure ADMIN_PASSWORD in .env}
+      TOKEN_ENCRYPTION_KEY: ${TOKEN_ENCRYPTION_KEY:?configure TOKEN_ENCRYPTION_KEY in .env}
+    expose:
+      - "3001"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+      args:
+        API_URL: http://api:3001
+    restart: unless-stopped
+    environment:
+      API_URL: http://api:3001
+    expose:
+      - "3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      private:
+      web_gateway:
+        aliases:
+          - amigo-doce-web
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres_data:
+
+networks:
+  private:
+    internal: true
+  web_gateway:
+    external: true
+    name: ${WEB_GATEWAY_NETWORK:-web_gateway}
