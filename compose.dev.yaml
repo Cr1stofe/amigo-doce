@@ -1,0 +1,113 @@
+services:
+  deps:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    working_dir: /workspace
+    user: "0:0"
+    command: ["sh", "-c", "corepack enable && corepack prepare pnpm@12.9.1 --activate && pnpm install --frozen-lockfile && pnpm --filter @amigo-doce/api exec prisma generate"]
+    environment:
+      COREPACK_HOME: /corepack
+    volumes:
+      - .:/workspace
+      - dev_root_node_modules:/workspace/node_modules
+      - dev_api_node_modules:/workspace/apps/api/node_modules
+      - dev_web_node_modules:/workspace/apps/web/node_modules
+      - dev_corepack:/corepack
+
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-amigo_doce_dev}
+      POSTGRES_USER: ${POSTGRES_USER:-amigo_doce_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_dev_only}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+    networks:
+      - dev_private
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+      target: development
+    working_dir: /workspace
+    user: "0:0"
+    command: ["sh", "-c", "corepack enable && pnpm --filter @amigo-doce/api exec prisma migrate deploy && pnpm --filter @amigo-doce/api dev"]
+    restart: unless-stopped
+    env_file:
+      - .env.development
+    environment:
+      COREPACK_HOME: /corepack
+      NODE_ENV: development
+      PORT: "3001"
+      DATABASE_URL: ${DATABASE_URL:-postgresql://amigo_doce_dev:local_dev_only@db:5432/amigo_doce_dev?schema=public}
+    ports:
+      - "127.0.0.1:3001:3001"
+    volumes:
+      - .:/workspace
+      - dev_root_node_modules:/workspace/node_modules
+      - dev_api_node_modules:/workspace/apps/api/node_modules
+      - dev_web_node_modules:/workspace/apps/web/node_modules
+      - dev_corepack:/corepack
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      db:
+        condition: service_healthy
+    networks:
+      - dev_private
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+  web:
+    image: node:26-bookworm-slim
+    working_dir: /workspace
+    user: "0:0"
+    command: ["sh", "-c", "(command -v corepack >/dev/null || npm install -g corepack) && corepack enable && pnpm --filter @amigo-doce/web dev"]
+    restart: unless-stopped
+    env_file:
+      - .env.development
+    environment:
+      COREPACK_HOME: /corepack
+      API_URL: http://api:3001
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - .:/workspace
+      - dev_root_node_modules:/workspace/node_modules
+      - dev_api_node_modules:/workspace/apps/api/node_modules
+      - dev_web_node_modules:/workspace/apps/web/node_modules
+      - dev_corepack:/corepack
+    depends_on:
+      deps:
+        condition: service_completed_successfully
+      api:
+        condition: service_healthy
+    networks:
+      - dev_private
+
+volumes:
+  dev_postgres_data:
+  dev_root_node_modules:
+  dev_api_node_modules:
+  dev_web_node_modules:
+  dev_corepack:
+
+networks:
+  dev_private:
+    driver: bridge

@@ -1,0 +1,40 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+}
+model Event {
+  id String @id @default(uuid())
+  title String
+  dateTime DateTime?
+  location String?
+  message String?
+  drawnAt DateTime?
+  createdAt DateTime @default(now())
+  participants Participant[]
+}
+model Participant {
+  id String @id @default(uuid())
+  eventId String
+  event Event @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  name String
+  matchId String? @unique
+  match Participant? @relation("Pair", fields: [matchId], references: [id], onDelete: SetNull)
+  giver Participant? @relation("Pair")
+  tokenHash String? @unique
+  tokenEncrypted String?
+  revealedAt DateTime?
+  @@index([eventId])
+}
+model Session {
+  id String @id
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  @@index([expiresAt])
+}
+model LoginRateLimit {
+  id String @id
+  attempts Int
+  windowStart DateTime
+}
